@@ -71,7 +71,7 @@ func resourceNatPortForwardCreate(d *schema.ResourceData, meta interface{}) erro
 	lock := pconf.Mutex
 	client := pconf.Client
 
-	request := map[string]string{
+	request := map[string]interface{}{
 		"interface":  d.Get("interface").(string),
 		"protocol":   d.Get("protocol").(string),
 		"src":        d.Get("src").(string),
@@ -80,6 +80,8 @@ func resourceNatPortForwardCreate(d *schema.ResourceData, meta interface{}) erro
 		"dstport":    d.Get("dstport").(string),
 		"target":     d.Get("target").(string),
 		"local-port": d.Get("local_port").(string),
+		"top":		  true,
+		"apply":	  true,
 	}
 
 	lock.Lock()
@@ -125,7 +127,7 @@ func resourceNatPortForwardCreate(d *schema.ResourceData, meta interface{}) erro
 		return fmt.Errorf("failed to find created NAT rule")
 	}
 
-	d.SetId(natResourceId(request["interface"], id))
+	d.SetId(natResourceId(request["interface"].(string), id))
 
 	lock.Unlock()
 	return resourceNatPortForwardRead(d, meta)
@@ -214,6 +216,7 @@ func resourceNatPortForwardDelete(d *schema.ResourceData, meta interface{}) erro
 
 	var request = map[string]interface{}{
 		"id": id,
+		"apply": true,
 	}
 	lock.Lock()
 	resp, err := client.R().
@@ -256,7 +259,7 @@ func resourceNatPortForwardUpdate(d *schema.ResourceData, meta interface{}) erro
 		return err
 	}
 
-	requestCreate := map[string]string{
+	requestCreate := map[string]interface{}{
 		"interface":  d.Get("interface").(string),
 		"protocol":   d.Get("protocol").(string),
 		"src":        d.Get("src").(string),
@@ -265,6 +268,8 @@ func resourceNatPortForwardUpdate(d *schema.ResourceData, meta interface{}) erro
 		"dstport":    d.Get("dstport").(string),
 		"target":     d.Get("target").(string),
 		"local-port": d.Get("local_port").(string),
+		"top":		  true,
+		"apply":	  true,
 	}
 
 	resp, err = client.R().
