@@ -55,7 +55,7 @@ func resourceNatPortForward() *schema.Resource {
 			"target": {
 				Type:         schema.TypeString,
 				Optional:     true,
-				ValidateFunc: validation.IsIPAddress,
+				ValidateFunc: validation.All(validation.StringIsNotEmpty, validation.StringIsNotWhiteSpace),
 			},
 			"local_port": {
 				Type:         schema.TypeString,

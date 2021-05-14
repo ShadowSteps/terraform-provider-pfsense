@@ -56,6 +56,7 @@ func Provider() *schema.Provider {
 		ResourcesMap: map[string]*schema.Resource{
 			"pfsense_dhcp_static_mapping": resourceDhcpStaticMapping(),
 			"pfsense_nat_port_forward": resourceNatPortForward(),
+			"pfsense_alias": resourceAlias(),
 		},
 
 		ConfigureFunc: providerConfigure,
