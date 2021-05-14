@@ -6,6 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -31,8 +32,8 @@ func resourceAlias() *schema.Resource {
 					validation.StringMatch(aliasNameRegex, "")),
 			},
 			"type": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:         schema.TypeString,
+				Required:     true,
 				ValidateFunc: validation.StringInSlice([]string{"host", "network", "port"}, false),
 			},
 			"desc": {
@@ -45,12 +46,12 @@ func resourceAlias() *schema.Resource {
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"value": {
-							Type: schema.TypeString,
-							Required: true,
-							ValidateFunc:  validation.All(validation.StringIsNotEmpty, validation.StringIsNotWhiteSpace),
+							Type:         schema.TypeString,
+							Required:     true,
+							ValidateFunc: validation.All(validation.StringIsNotEmpty, validation.StringIsNotWhiteSpace),
 						},
 						"details": {
-							Type: schema.TypeString,
+							Type:     schema.TypeString,
 							Optional: true,
 						},
 					},
@@ -103,7 +104,6 @@ func resourceAliasCreate(d *schema.ResourceData, meta interface{}) error {
 			request["detail"].([]interface{})[i] = value.(map[string]interface{})["details"]
 		}
 	}
-
 
 	resp, err := client.R().
 		SetBody(request).
@@ -175,22 +175,26 @@ func resourceAliasRead(d *schema.ResourceData, meta interface{}) error {
 
 	values := make([]map[string]string, 0)
 	switch typ := data.Values.(type) {
-		case []string:
-			for i, value := range data.Values.([]string) {
-				configValue := map[string]string{
-					"value": value,
-					"details": data.Details.([]string)[i],
-				}
-				values = append(values, configValue)
-			}
-		case string:
+	case []string:
+		for i, value := range data.Values.([]string) {
 			configValue := map[string]string{
-				"value": data.Values.(string),
-				"details": data.Details.(string),
+				"value":   value,
+				"details": data.Details.([]string)[i],
 			}
 			values = append(values, configValue)
-		default:
-			return fmt.Errorf("result from data value list is not from supported type: %s", typ)
+		}
+	case string:
+		valueArray := strings.Split(data.Values.(string), " ")
+		detailsArray := strings.Split(data.Details.(string), "||")
+		for i, value := range valueArray {
+			configValue := map[string]string{
+				"value":   value,
+				"details": detailsArray[i],
+			}
+			values = append(values, configValue)
+		}
+	default:
+		return fmt.Errorf("result from data value list is not from supported type: %s", typ)
 	}
 
 	err2 = d.Set("value", values)
@@ -225,7 +229,7 @@ func resourceAliasDelete(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	var request = map[string]interface{}{
-		"id": data.Id,
+		"id": name,
 	}
 
 	resp, err := client.R().
@@ -238,12 +242,11 @@ func resourceAliasDelete(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	if resp.StatusCode() != 200 {
-		return fmt.Errorf("invalid response code on delete: %d", resp.StatusCode())
+		return fmt.Errorf("invalid response code on delete: %d, response %s, request: %s", resp.StatusCode(), resp.Body(), request)
 	}
 
 	return nil
 }
-
 
 func resourceAliasUpdate(d *schema.ResourceData, meta interface{}) error {
 	pconf := meta.(*providerConfiguration)
@@ -267,8 +270,8 @@ func resourceAliasUpdate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	var request = map[string]interface{}{
-		"id": data.Id,
-		"name": name,
+		"id":   name,
+		"name": d.Get("name"),
 		"type": d.Get("type"),
 	}
 
@@ -311,10 +314,9 @@ func aliasResourceId(name string) string {
 	return fmt.Sprintf("%s", name)
 }
 
-
 func parseAliasResourceId(resId string) (name string, err error) {
 	if !aliasNameRegex.MatchString(resId) {
-		return "",  fmt.Errorf("invalid resource format: %s. must be %s", resId, aliasNameRegex.String())
+		return "", fmt.Errorf("invalid resource format: %s. must be %s", resId, aliasNameRegex.String())
 	}
 	name = resId
 	return
@@ -322,23 +324,36 @@ func parseAliasResourceId(resId string) (name string, err error) {
 
 func fetchAlias(client *resty.Client, aliasName string) (*ReadAlias, error) {
 	resp, err := client.R().
-		SetResult(&ReadAliasArrayResponse{}).
+		SetQueryParams(map[string]string{
+			"name": aliasName,
+		}).
+		SetResult(&ReadAliasMapResponse{}).
 		ForceContentType("application/json").
 		Get(PFSenseApiUri.Alias)
 
 	if err != nil {
-		return nil, err
+		resp, err = client.R().
+			SetQueryParams(map[string]string{
+				"name": aliasName,
+			}).
+			SetResult(&ReadAliasArrayResponse{}).
+			ForceContentType("application/json").
+			Get(PFSenseApiUri.Alias)
+
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
 	}
 
 	if resp.StatusCode() != 200 {
 		return nil, fmt.Errorf("invalid response code on fetch: %d", resp.StatusCode())
 	}
 
-	var result = resp.Result().(*ReadAliasArrayResponse)
-	for k := range result.Data {
-		if result.Data[k].Name == aliasName {
-			return result.Data[k], nil
-		}
+	var result = resp.Result()
+
+	for k := range result.(*ReadAliasMapResponse).Data {
+		return result.(*ReadAliasMapResponse).Data[k], nil
 	}
 
 	return nil, nil
@@ -348,11 +363,17 @@ type ReadAliasArrayResponse struct {
 	ApiBaseResponse
 	Data []*ReadAlias `json:"data"`
 }
+
+type ReadAliasMapResponse struct {
+	ApiBaseResponse
+	Data map[string]*ReadAlias `json:"data"`
+}
+
 type ReadAlias struct {
-	Id int `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Description string `json:"descr"`
-	Values interface{} `json:"address"`
-	Details interface{} `json:"detail"`
+	Id          int         `json:"id"`
+	Name        string      `json:"name"`
+	Type        string      `json:"type"`
+	Description string      `json:"descr"`
+	Values      interface{} `json:"address"`
+	Details     interface{} `json:"detail"`
 }
